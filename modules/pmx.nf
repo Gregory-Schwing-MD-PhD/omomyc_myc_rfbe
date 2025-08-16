@@ -138,5 +138,12 @@ workflow test {
             files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
         }
     //stateB_sorted.view()
+    chA_indexed = stateA_sorted.flatten()
+    chB_indexed = stateB_sorted.flatten()
+    chA_indexed.merge(chB_indexed).set { ch_pbc }
+
+    ch_pbc.take(1).view()
+
+
 
 }

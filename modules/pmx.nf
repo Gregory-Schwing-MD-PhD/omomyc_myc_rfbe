@@ -105,13 +105,13 @@ process pmxMutateFrames {
     output:
     path "*_mutA.pdb", emit: mutA_pdbs
     path "*_mutB.pdb", emit: mutB_pdbs
+    tuple path("*_mutA.pdb"), path("*_mutB.pdb"), emit: mut_pdbs
 
     script:
     """
     python3 <<'EOF'
 from biobb_pmx.pmxbiobb.pmxmutate import pmxmutate
 import os
-gmxlib = '/opt/miniforge/lib/python3.10/site-packages/pmx/data/mutff'
 
 # Input files from Nextflow tuple
 pdbA = '${pdbA}'
@@ -123,7 +123,7 @@ propA = {
     'force_field'  : 'amber99sb-star-ildn-mut',
     'mutation_list': '10Ala',
     'binary_path'  : 'pmx',
-    'gmx_lib'      : gmxlib
+    'gmx_lib'      : '${params.gmxlib}'
 }
 pmxmutate(input_structure_path=pdbA,
           output_structure_path=output_structure_mutA,
@@ -135,7 +135,7 @@ propB = {
     'force_field'  : 'amber99sb-star-ildn-mut',
     'mutation_list': '10Ile',
     'binary_path'  : 'pmx',
-    'gmx_lib'      : gmxlib
+    'gmx_lib'      : '${params.gmxlib}'
 }
 pmxmutate(input_structure_path=pdbB,
           output_structure_path=output_structure_mutB,
@@ -143,6 +143,58 @@ pmxmutate(input_structure_path=pdbB,
 EOF
     """
 }
+
+process pdb2gmxFrames {
+    cache = true
+    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    tuple path(mutA_pdb), path(mutB_pdb)
+
+    output:
+    path "pdb2gmxA_*.gro", emit: groA_files
+    path "pdb2gmxA_top_*.zip", emit: topA_files
+    path "pdb2gmxB_*.gro", emit: groB_files
+    path "pdb2gmxB_top_*.zip", emit: topB_files
+
+    script:
+    """
+    python3 <<'EOF'
+from biobb_gromacs.gromacs.pdb2gmx import pdb2gmx
+import os
+
+# Inputs
+mutA = '${mutA_pdb}'
+mutB = '${mutB_pdb}'
+
+# State A: WT -> Mut
+output_groA = os.path.basename(mutA).replace('.pdb', '_pdb2gmxA.gro')
+output_topA = os.path.basename(mutA).replace('.pdb', '_pdb2gmxA_top.zip')
+propA = {
+    'force_field': 'amber99sb-star-ildn-mut',
+    'gmx_lib': '${params.gmxlib}'
+}
+pdb2gmx(input_pdb_path=mutA,
+        output_gro_path=output_groA,
+        output_top_zip_path=output_topA,
+        properties=propA)
+
+# State B: Mut -> WT
+output_groB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB.gro')
+output_topB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB_top.zip')
+propB = {
+    'force_field': 'amber99sb-star-ildn-mut',
+    'gmx_lib': '${params.gmxlib}'
+}
+pdb2gmx(input_pdb_path=mutB,
+        output_gro_path=output_groB,
+        output_top_zip_path=output_topB,
+        properties=propB)
+EOF
+    """
+}
+
 
 
 workflow test {
@@ -195,5 +247,7 @@ workflow test {
 
     // Step 6: run pmxMutateFrames on all pairs
     pmxMutateFrames(ch_pbc.take(1))
-    pmxMutateFrames.output.view()
+    pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs)
+
+
 }

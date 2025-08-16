@@ -1,5 +1,11 @@
+nextflow.enable.dsl=2
+
 process downloadInputs {
+    cache = true
     publishDir "${params.output_folder}/inputs/", mode: 'copy', overwrite: true
+
+    input:
+    val trigger
 
     output:
     path "stateA.tpr",     emit: stateA_tpr
@@ -12,18 +18,95 @@ process downloadInputs {
 
     script:
     """
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA.tpr     -O stateA.tpr
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA_1ns.xtc -O stateA_1ns.xtc
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB.tpr     -O stateB.tpr
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB_1ns.xtc -O stateB_1ns.xtc
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlA.zip     -O dhdlA.zip
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlB.zip     -O dhdlB.zip
-    wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/schema.png    -O schema.png
+    [ -s stateA.tpr     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA.tpr     -O stateA.tpr
+    [ -s stateA_1ns.xtc ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA_1ns.xtc -O stateA_1ns.xtc
+    [ -s stateB.tpr     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB.tpr     -O stateB.tpr
+    [ -s stateB_1ns.xtc ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB_1ns.xtc -O stateB_1ns.xtc
+    [ -s dhdlA.zip      ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlA.zip     -O dhdlA.zip
+    [ -s dhdlB.zip      ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlB.zip     -O dhdlB.zip
+    [ -s schema.png     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/schema.png    -O schema.png
     """
 }
 
+process extractSnapshots {
+    cache = true
+    publishDir "${params.output_folder}/snapshots/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    path stateA_traj
+    path stateA_tpr
+    path stateB_traj
+    path stateB_tpr
+
+    output:
+    path "stateA_frames.zip", emit: stateA_frames
+    path "stateB_frames.zip", emit: stateB_frames
+    path "stateA_frame*.pdb", emit: stateA_pdbs
+    path "stateB_frame*.pdb", emit: stateB_pdbs
+
+    script:
+    """
+    python3 <<'EOF'
+import zipfile
+from biobb_analysis.gromacs.gmx_trjconv_str_ens import gmx_trjconv_str_ens
+
+#### State A ####
+output_framesA = 'stateA_frames.zip'
+propA = {
+    'selection' : 'System',
+    'start': 1,
+    'end': 1000,
+    'dt': 200,
+    'output_name': 'stateA_frame',
+    'output_type': 'pdb'
+}
+gmx_trjconv_str_ens(input_traj_path="${stateA_traj}",
+                    input_top_path="${stateA_tpr}",
+                    output_str_ens_path=output_framesA,
+                    properties=propA)
+
+with zipfile.ZipFile(output_framesA, 'r') as zip_f:
+    zip_f.extractall()
+
+#### State B ####
+output_framesB = 'stateB_frames.zip'
+propB = {
+    'selection' : 'System',
+    'start': 1,
+    'end': 1000,
+    'dt': 200,
+    'output_name': 'stateB_frame',
+    'output_type': 'pdb'
+}
+gmx_trjconv_str_ens(input_traj_path="${stateB_traj}",
+                    input_top_path="${stateB_tpr}",
+                    output_str_ens_path=output_framesB,
+                    properties=propB)
+
+with zipfile.ZipFile(output_framesB, 'r') as zip_f:
+    zip_f.extractall()
+EOF
+    """
+}
 
 workflow test {
     main:
-    downloadInputs()
+    // Step 1: create dummy trigger to allow caching
+    ch_dummy = Channel.value("inputs")
+
+    // Step 2: run downloadInputs
+    inputs = downloadInputs(ch_dummy)
+
+    // Step 3: run extractSnapshots
+    snapshots = extractSnapshots(
+        inputs.stateA_traj,
+        inputs.stateA_tpr,
+        inputs.stateB_traj,
+        inputs.stateB_tpr
+    )
+
+    // Debug / verify outputs
+    snapshots.stateA_pdbs.view { "Extracted StateA snapshot: $it" }
+    snapshots.stateB_pdbs.view { "Extracted StateB snapshot: $it" }
 }

@@ -94,6 +94,55 @@ EOF
     """
 }
 
+process pmxMutateFrames {
+    cache = true
+    publishDir "${params.output_folder}/mutated/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    tuple path(pdbA), path(pdbB)
+
+    output:
+    path "*_mutA.pdb", emit: mutA_pdbs
+    path "*_mutB.pdb", emit: mutB_pdbs
+
+    script:
+    """
+    python3 <<'EOF'
+from biobb_pmx.pmxbiobb.pmxmutate import pmxmutate
+import os
+gmxlib = '/opt/miniforge/lib/python3.10/site-packages/pmx/data/mutff'
+
+# Input files from Nextflow tuple
+pdbA = '${pdbA}'
+pdbB = '${pdbB}'
+
+# State A: WT -> Mut
+output_structure_mutA = os.path.basename(pdbA).replace('.pdb', '_mutA.pdb')
+propA = {
+    'force_field'  : 'amber99sb-star-ildn-mut',
+    'mutation_list': '10Ala',
+    'binary_path'  : 'pmx',
+    'gmx_lib'      : gmxlib
+}
+pmxmutate(input_structure_path=pdbA,
+          output_structure_path=output_structure_mutA,
+          properties=propA)
+
+# State B: Mut -> WT
+output_structure_mutB = os.path.basename(pdbB).replace('.pdb', '_mutB.pdb')
+propB = {
+    'force_field'  : 'amber99sb-star-ildn-mut',
+    'mutation_list': '10Ile',
+    'binary_path'  : 'pmx',
+    'gmx_lib'      : gmxlib
+}
+pmxmutate(input_structure_path=pdbB,
+          output_structure_path=output_structure_mutB,
+          properties=propB)
+EOF
+    """
+}
 
 
 workflow test {
@@ -144,6 +193,7 @@ workflow test {
 
     ch_pbc.take(1).view()
 
-
-
+    // Step 6: run pmxMutateFrames on all pairs
+    pmxMutateFrames(ch_pbc.take(1))
+    pmxMutateFrames.output.view()
 }

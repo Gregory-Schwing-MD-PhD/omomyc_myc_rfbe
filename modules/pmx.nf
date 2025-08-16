@@ -25,7 +25,6 @@ process downloadInputs {
     """
 }
 
-
 process extractSnapshots {
     cache = true
     publishDir "${params.output_folder}/snapshots/", mode: 'copy', overwrite: true
@@ -40,8 +39,8 @@ process extractSnapshots {
     output:
     path "stateA_frames.zip", emit: stateA_frames
     path "stateB_frames.zip", emit: stateB_frames
-    path "stateA_frame*.pdb", emit: stateA_pdbs
-    path "stateB_frame*.pdb", emit: stateB_pdbs
+    path "frameA*.pdb", emit: stateA_pdbs
+    path "frameB*.pdb", emit: stateB_pdbs
 
     script:
     """
@@ -51,42 +50,49 @@ from biobb_analysis.gromacs.gmx_trjconv_str_ens import gmx_trjconv_str_ens
 
 #### State A ####
 output_framesA = 'stateA_frames.zip'
-propA = {
-    'selection' : 'System',
-    'start': 1,
-    'end': 1000,
-    'dt': 200,
-    'output_name': 'stateA_frame',
-    'output_type': 'pdb'
+
+prop = {
+    'selection'   : "${params.selection}",
+    'start'       : int("${params.start}"),
+    'end'         : int("${params.end}"),
+    'dt'          : int("${params.dt}") if int("${params.dt}") > 0 else max(1, (int("${params.end}") - int("${params.start}")) // int("${params.n_snapshots}")),
+    'output_name' : 'frameA',
+    'output_type' : "${params.output_type}"
 }
+
 gmx_trjconv_str_ens(input_traj_path="${stateA_traj}",
-                    input_top_path="${stateA_tpr}",
-                    output_str_ens_path=output_framesA,
-                    properties=propA)
+                 input_top_path="${stateA_tpr}",
+                 output_str_ens_path=output_framesA,
+                 properties=prop)
 
 with zipfile.ZipFile(output_framesA, 'r') as zip_f:
     zip_f.extractall()
+    stateA_pdb_list = zip_f.namelist()
 
 #### State B ####
 output_framesB = 'stateB_frames.zip'
-propB = {
-    'selection' : 'System',
-    'start': 1,
-    'end': 1000,
-    'dt': 200,
-    'output_name': 'stateB_frame',
-    'output_type': 'pdb'
+
+prop = {
+    'selection'   : "${params.selection}",
+    'start'       : int("${params.start}"),
+    'end'         : int("${params.end}"),
+    'dt'          : int("${params.dt}") if int("${params.dt}") > 0 else max(1, (int("${params.end}") - int("${params.start}")) // int("${params.n_snapshots}")),
+    'output_name' : 'frameB',
+    'output_type' : "${params.output_type}"
 }
+
 gmx_trjconv_str_ens(input_traj_path="${stateB_traj}",
-                    input_top_path="${stateB_tpr}",
-                    output_str_ens_path=output_framesB,
-                    properties=propB)
+                 input_top_path="${stateB_tpr}",
+                 output_str_ens_path=output_framesB,
+                 properties=prop)
 
 with zipfile.ZipFile(output_framesB, 'r') as zip_f:
     zip_f.extractall()
+    stateB_pdb_list = zip_f.namelist()
 EOF
     """
 }
+
 
 
 workflow test {

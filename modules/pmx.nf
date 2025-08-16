@@ -139,6 +139,4 @@ workflow test {
         }
     //stateB_sorted.view()
 
-    
-
 }

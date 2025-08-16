@@ -120,6 +120,22 @@ workflow test {
     )
 
     // Debug / verify outputs
-    snapshots.stateA_pdbs.view { "Extracted StateA snapshot: $it" }
-    snapshots.stateB_pdbs.view { "Extracted StateB snapshot: $it" }
+    //snapshots.stateA_pdbs.view { "Extracted StateA snapshot: $it" }
+    //snapshots.stateB_pdbs.view { "Extracted StateB snapshot: $it" }
+
+    stateA_sorted = snapshots.stateA_pdbs
+        .collect()
+        .map { files ->
+            files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
+        }
+
+    stateA_sorted.view()
+
+    stateB_sorted = snapshots.stateB_pdbs
+        .collect()
+        .map { files ->
+            files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
+        }
+    stateB_sorted.view()
+
 }

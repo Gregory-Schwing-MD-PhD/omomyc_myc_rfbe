@@ -26,6 +26,8 @@ RUN mamba env update --file env.yml -n base \
     && mamba update -c conda-forge procps-ng -y \
     && mamba clean --all --yes
 
+RUN mamba init
+
 # Make the conda environment active by default
 SHELL ["conda", "run", "-n", "base", "/bin/bash", "-c"]
 

@@ -2,31 +2,29 @@ nextflow.enable.dsl=2
 
 process downloadInputs {
     cache = true
-    publishDir "${params.output_folder}/inputs/", mode: 'copy', overwrite: true
+    publishDir "${params.output_folder}/inputs/", mode: 'copy'
 
     input:
-    val trigger
+    val urls
 
     output:
-    path "stateA.tpr",     emit: stateA_tpr
-    path "stateA_1ns.xtc", emit: stateA_traj
-    path "stateB.tpr",     emit: stateB_tpr
-    path "stateB_1ns.xtc", emit: stateB_traj
-    path "dhdlA.zip",      emit: dhdlA
-    path "dhdlB.zip",      emit: dhdlB
-    path "schema.png",     emit: schema
+    path "stateA.tpr"     , emit: stateA_tpr
+    path "stateA_1ns.xtc" , emit: stateA_traj
+    path "stateB.tpr"     , emit: stateB_tpr
+    path "stateB_1ns.xtc" , emit: stateB_traj
+    path "dhdlA.zip"      , emit: dhdlA
+    path "dhdlB.zip"      , emit: dhdlB
+    path "schema.png"     , emit: schema
 
     script:
     """
-    [ -s stateA.tpr     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA.tpr     -O stateA.tpr
-    [ -s stateA_1ns.xtc ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA_1ns.xtc -O stateA_1ns.xtc
-    [ -s stateB.tpr     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB.tpr     -O stateB.tpr
-    [ -s stateB_1ns.xtc ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB_1ns.xtc -O stateB_1ns.xtc
-    [ -s dhdlA.zip      ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlA.zip     -O dhdlA.zip
-    [ -s dhdlB.zip      ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlB.zip     -O dhdlB.zip
-    [ -s schema.png     ] || wget -q https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/schema.png    -O schema.png
+    for url in ${urls.join(" ")}; do
+        fname=\$(basename \$url)
+        [ -s \$fname ] || wget -q \$url -O \$fname
+    done
     """
 }
+
 
 process extractSnapshots {
     cache = true
@@ -90,13 +88,22 @@ EOF
     """
 }
 
+
 workflow test {
     main:
-    // Step 1: create dummy trigger to allow caching
-    ch_dummy = Channel.value("inputs")
+    // Step 1: define all URLs in one channel
+    urls_ch = Channel.value([
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA.tpr",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA_1ns.xtc",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB.tpr",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB_1ns.xtc",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlA.zip",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlB.zip",
+        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/schema.png"
+    ])
 
     // Step 2: run downloadInputs
-    inputs = downloadInputs(ch_dummy)
+    inputs = downloadInputs(urls_ch)
 
     // Step 3: run extractSnapshots
     snapshots = extractSnapshots(

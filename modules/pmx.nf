@@ -41,6 +41,7 @@ process extractSnapshots {
     path "stateB_frames.zip", emit: stateB_frames
     path "frameA*.pdb", emit: stateA_pdbs
     path "frameB*.pdb", emit: stateB_pdbs
+    path "frame*.pdb", emit: states_pdbs
 
     script:
     """
@@ -129,13 +130,15 @@ workflow test {
             files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
         }
 
-    stateA_sorted.view()
+    //stateA_sorted.view()
 
     stateB_sorted = snapshots.stateB_pdbs
         .collect()
         .map { files ->
             files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
         }
-    stateB_sorted.view()
+    //stateB_sorted.view()
+
+    
 
 }

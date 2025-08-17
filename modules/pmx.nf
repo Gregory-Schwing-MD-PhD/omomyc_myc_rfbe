@@ -145,7 +145,7 @@ EOF
 }
 process pdb2gmxFrames {
     cache = true
-    debug = true
+    debug = false
     publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
 

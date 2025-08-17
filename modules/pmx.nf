@@ -187,7 +187,7 @@ EOF
 
 process pmxGentop {
     cache = true
-    debug = true
+    debug = false
     publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
 
@@ -196,7 +196,7 @@ process pmxGentop {
 
     output:
     path "*_MUT_top.zip", emit: top_files
-    path "*_MUT_top.log", emit: log_files
+    //path "*_MUT_top.log", emit: log_files
 
     script:
     """
@@ -211,7 +211,7 @@ top_zip = '${input_top_zip}'
 basename = os.path.basename(top_zip).replace('.zip', '')
 output_top_zip = f"{basename}_MUT_top.zip"
 output_log = f"{basename}_MUT_top.log"
-
+print(output_log)
 # Properties
 prop = {
     'force_field': 'amber99sb-star-ildn-mut',
@@ -280,6 +280,6 @@ workflow test {
     // Step 6: run pmxMutateFrames on all pairs
     pmxMutateFrames(ch_pbc.take(1))
     pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs.flatten())
-
+    pmxGentop(pdb2gmxFrames.output.top_files)
 
 }

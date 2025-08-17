@@ -143,7 +143,6 @@ pmxmutate(input_structure_path=pdbB,
 EOF
     """
 }
-
 process pdb2gmxFrames {
     cache = true
     debug = true
@@ -151,48 +150,37 @@ process pdb2gmxFrames {
     container "${params.container__biobb_pmx}"
 
     input:
-    tuple path(mutA_pdb), path(mutB_pdb)
+    path input_pdb
 
     output:
-    path "*pdb2gmxA.gro", emit: groA_files
-    path "*pdb2gmxA_top.zip", emit: topA_files
-    path "*pdb2gmxB.gro", emit: groB_files
-    path "*pdb2gmxB_top.zip", emit: topB_files
+    path "*_MUT.gro", emit: gro_files
+    path "*_MUT_top.zip", emit: top_files
+
     script:
     """
     python3 <<'EOF'
 from biobb_gromacs.gromacs.pdb2gmx import pdb2gmx
 import os
 
-# Inputs
-mutA = '${mutA_pdb}'
-mutB = '${mutB_pdb}'
+# Input
+pdb_file = '${input_pdb}'
 
-# State A: WT -> Mut
-output_groA = os.path.basename(mutA).replace('.pdb', '_pdb2gmxA.gro')
-output_topA = os.path.basename(mutA).replace('.pdb', '_pdb2gmxA_top.zip')
-propA = {
+# Outputs with _MUT appended
+basename = os.path.basename(pdb_file).replace('.pdb', '')
+output_gro = f"{basename}_MUT.gro"
+output_top = f"{basename}_MUT_top.zip"
+
+# Properties
+props = {
     'force_field': 'amber99sb-star-ildn-mut',
     'gmx_lib': '${params.gmxlib}'
 }
-pdb2gmx(input_pdb_path=mutA,
-        output_gro_path=output_groA,
-        output_top_zip_path=output_topA,
-        properties=propA)
 
-
-# State B: Mut -> WT
-output_groB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB.gro')
-output_topB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB_top.zip')
-propB = {
-    'force_field': 'amber99sb-star-ildn-mut',
-    'gmx_lib': '${params.gmxlib}'
-}
-pdb2gmx(input_pdb_path=mutB,
-        output_gro_path=output_groB,
-        output_top_zip_path=output_topB,
-        properties=propB)
-
+# Run pdb2gmx
+pdb2gmx(input_pdb_path=pdb_file,
+        output_gro_path=output_gro,
+        output_top_zip_path=output_top,
+        properties=props)
 EOF
     """
 }
@@ -249,7 +237,7 @@ workflow test {
 
     // Step 6: run pmxMutateFrames on all pairs
     pmxMutateFrames(ch_pbc.take(1))
-    pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs)
+    pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs.flatten())
 
 
 }

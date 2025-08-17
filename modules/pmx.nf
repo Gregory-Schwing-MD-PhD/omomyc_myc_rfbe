@@ -146,6 +146,7 @@ EOF
 
 process pdb2gmxFrames {
     cache = true
+    debug = true
     publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
 
@@ -153,11 +154,10 @@ process pdb2gmxFrames {
     tuple path(mutA_pdb), path(mutB_pdb)
 
     output:
-    path "pdb2gmxA_*.gro", emit: groA_files
-    path "pdb2gmxA_top_*.zip", emit: topA_files
-    path "pdb2gmxB_*.gro", emit: groB_files
-    path "pdb2gmxB_top_*.zip", emit: topB_files
-
+    path "*pdb2gmxA.gro", emit: groA_files
+    path "*pdb2gmxA_top.zip", emit: topA_files
+    path "*pdb2gmxB.gro", emit: groB_files
+    path "*pdb2gmxB_top.zip", emit: topB_files
     script:
     """
     python3 <<'EOF'
@@ -180,6 +180,7 @@ pdb2gmx(input_pdb_path=mutA,
         output_top_zip_path=output_topA,
         properties=propA)
 
+
 # State B: Mut -> WT
 output_groB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB.gro')
 output_topB = os.path.basename(mutB).replace('.pdb', '_pdb2gmxB_top.zip')
@@ -191,6 +192,7 @@ pdb2gmx(input_pdb_path=mutB,
         output_gro_path=output_groB,
         output_top_zip_path=output_topB,
         properties=propB)
+
 EOF
     """
 }

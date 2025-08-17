@@ -228,6 +228,99 @@ EOF
     """
 }
 
+process gmxMakeNdx {
+    cache = true
+    debug = false
+    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    path input_gro  // input structure, e.g., output from pdb2gmx
+
+    output:
+    path "*_ndx.ndx", emit: ndx_files
+
+    script:
+    """
+    python3 <<'EOF'
+from biobb_gromacs.gromacs.make_ndx import make_ndx
+import os
+
+# Input
+gro_file = '${input_gro}'
+
+# Output .ndx file with _ndx appended
+basename = os.path.basename(gro_file).replace('.gro', '')
+output_ndx = f"{basename}_ndx.ndx"
+
+# Properties
+prop = {
+    'selection': 'a D*\\n0 & ! 19\\nname 20 FREEZE'
+}
+
+# Run make_ndx
+make_ndx(input_structure_path=gro_file,
+         output_ndx_path=output_ndx,
+         properties=prop)
+EOF
+    """
+}
+
+process gmxGromppMin {
+    cache = true
+    debug = true
+    publishDir "${params.output_folder}/minimization/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    path input_gro
+    path input_top_zip
+    path input_ndx
+
+    output:
+    path "*_em.tpr", emit: tpr_files
+
+    script:
+    """
+    python3 <<'EOF'
+from biobb_gromacs.gromacs.grompp import grompp
+import os
+
+# Inputs
+gro_file = '${input_gro}'
+top_zip = '${input_top_zip}'
+ndx_file = '${input_ndx}'
+
+# Output filename
+basename = os.path.basename(gro_file).replace('.gro', '')
+output_tpr = f"{basename}_em.tpr"
+
+# Properties
+prop = {
+    'gmx_lib': '${params.gmxlib}',
+    'mdp': {
+        'integrator': 'steep',
+        'emtol': '100',
+        'dt': '0.001',
+        'nsteps': '10000',
+        'nstcomm': '1',
+        'nstcalcenergy': '1',
+        'freezegrps': 'FREEZE',
+        'freezedim': 'Y Y Y'
+    },
+    'simulation_type': 'minimization'
+}
+
+# Run grompp
+grompp(input_gro_path=gro_file,
+       input_top_zip_path=top_zip,
+       input_ndx_path=ndx_file,
+       output_tpr_path=output_tpr,
+       properties=prop)
+EOF
+    """
+}
+
 
 workflow test {
     main:
@@ -281,5 +374,5 @@ workflow test {
     pmxMutateFrames(ch_pbc.take(1))
     pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs.flatten())
     pmxGentop(pdb2gmxFrames.output.top_files)
-
+    gmxMakeNdx(pdb2gmxFrames.output.gro_files)
 }

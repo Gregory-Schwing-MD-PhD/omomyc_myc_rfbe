@@ -185,6 +185,48 @@ EOF
     """
 }
 
+process pmxGentop {
+    cache = true
+    debug = true
+    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+
+    input:
+    path input_top_zip
+
+    output:
+    path "*_MUT_top.zip", emit: top_files
+    path "*_MUT_top.log", emit: log_files
+
+    script:
+    """
+    python3 <<'EOF'
+from biobb_pmx.pmxbiobb.pmxgentop import pmxgentop
+import os
+
+# Input
+top_zip = '${input_top_zip}'
+
+# Outputs with _MUT appended
+basename = os.path.basename(top_zip).replace('.zip', '')
+output_top_zip = f"{basename}_MUT_top.zip"
+output_log = f"{basename}_MUT_top.log"
+
+# Properties
+prop = {
+    'force_field': 'amber99sb-star-ildn-mut',
+    'binary_path': 'pmx',
+    'gmx_lib': '${params.gmxlib}'
+}
+
+# Run pmxgentop
+pmxgentop(input_top_zip_path=top_zip,
+          output_top_zip_path=output_top_zip,
+          output_log_path=output_log,
+          properties=prop)
+EOF
+    """
+}
 
 
 workflow test {

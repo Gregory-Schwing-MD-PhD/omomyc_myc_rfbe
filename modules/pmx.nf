@@ -96,17 +96,16 @@ EOF
 
 process pmxMutateFrames {
     cache = true
-    publishDir "${params.output_folder}/mutated/", mode: 'copy', overwrite: true
+    publishDir "${params.output_folder}/mutated/state_${state}/frame_${index}", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
-
+    
     input:
-    tuple path(pdbA), path(pdbB)
-
+    tuple path(pdb), val(state), val(index), val(mutation)
+    
     output:
-    path "*_mutA.pdb", emit: mutA_pdbs
-    path "*_mutB.pdb", emit: mutB_pdbs
-    tuple path("*_mutA.pdb"), path("*_mutB.pdb"), emit: mut_pdbs
-
+    path "*_mut*.pdb", emit: mut_pdbs
+    tuple path("*_mut*.pdb"), val(state), val(index), val(mutation), emit: system
+    
     script:
     """
     python3 <<'EOF'
@@ -114,48 +113,38 @@ from biobb_pmx.pmxbiobb.pmxmutate import pmxmutate
 import os
 
 # Input files from Nextflow tuple
-pdbA = '${pdbA}'
-pdbB = '${pdbB}'
+pdb = '${pdb}'
+state = '${state}'
+mutation = '${mutation}'
 
-# State A: WT -> Mut
-output_structure_mutA = os.path.basename(pdbA).replace('.pdb', '_mutA.pdb')
-propA = {
-    'force_field'  : 'amber99sb-star-ildn-mut',
-    'mutation_list': '10Ala',
-    'binary_path'  : 'pmx',
-    'gmx_lib'      : '${params.gmxlib}'
-}
-pmxmutate(input_structure_path=pdbA,
-          output_structure_path=output_structure_mutA,
-          properties=propA)
+# Create output filename
+output_structure_mut = os.path.basename(pdb).replace('.pdb', '_mut' + state + '.pdb')
 
-# State B: Mut -> WT
-output_structure_mutB = os.path.basename(pdbB).replace('.pdb', '_mutB.pdb')
-propB = {
-    'force_field'  : 'amber99sb-star-ildn-mut',
-    'mutation_list': '10Ile',
-    'binary_path'  : 'pmx',
-    'gmx_lib'      : '${params.gmxlib}'
+prop = {
+    'force_field' : 'amber99sb-star-ildn-mut',
+    'mutation_list': mutation,
+    'binary_path' : 'pmx',
+    'gmx_lib' : '${params.gmxlib}'
 }
-pmxmutate(input_structure_path=pdbB,
-          output_structure_path=output_structure_mutB,
-          properties=propB)
+
+pmxmutate(input_structure_path=pdb,
+          output_structure_path=output_structure_mut,
+          properties=prop)
 EOF
     """
 }
 process pdb2gmxFrames {
     cache = true
     debug = false
-    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    publishDir "${params.output_folder}/topologies/state_${state}/frame_${index}", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
-
+    
     input:
-    path input_pdb
-
+    tuple path(input_pdb), val(state), val(index), val(mutation)
+    
     output:
-    path "*_MUT.gro", emit: gro_files
-    path "*_MUT_top.zip", emit: top_files
-
+    tuple path("*_MUT_top.zip"), path("*_MUT.gro"), val(state), val(index), val(mutation), emit: system
+    
     script:
     """
     python3 <<'EOF'
@@ -188,16 +177,15 @@ EOF
 process pmxGentop {
     cache = true
     debug = false
-    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    publishDir "${params.output_folder}/topologies/state_${state}/frame_${index}", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
-
+    
     input:
-    path input_top_zip
-
+    tuple path(input_top_zip), path(input_gro), val(state), val(index), val(mutation)
+    
     output:
-    path "*_MUT_top.zip", emit: top_files
-    //path "*_MUT_top.log", emit: log_files
-
+    tuple path(input_top_zip), path("*_MUT_top.zip"), path(input_gro), val(state), val(index), val(mutation), emit: system
+    
     script:
     """
     python3 <<'EOF'
@@ -212,6 +200,7 @@ basename = os.path.basename(top_zip).replace('.zip', '')
 output_top_zip = f"{basename}_MUT_top.zip"
 output_log = f"{basename}_MUT_top.log"
 print(output_log)
+
 # Properties
 prop = {
     'force_field': 'amber99sb-star-ildn-mut',
@@ -231,15 +220,15 @@ EOF
 process gmxMakeNdx {
     cache = true
     debug = false
-    publishDir "${params.output_folder}/topologies/", mode: 'copy', overwrite: true
+    publishDir "${params.output_folder}/topologies/state_${state}/frame_${index}", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
-
+    
     input:
-    path input_gro  // input structure, e.g., output from pdb2gmx
-
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), val(state), val(index), val(mutation)
+    
     output:
-    path "*_ndx.ndx", emit: ndx_files
-
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path("*_ndx.ndx"), val(state), val(index), val(mutation), emit: system
+    
     script:
     """
     python3 <<'EOF'
@@ -265,49 +254,67 @@ make_ndx(input_structure_path=gro_file,
 EOF
     """
 }
-
-process gmxGromppMin {
+process gmxMinimize {
     cache = true
-    debug = true
-    publishDir "${params.output_folder}/minimization/", mode: 'copy', overwrite: true
+    debug = false
+    publishDir "${params.output_folder}/minimization/state_${state}/frame_${index}", mode: 'copy', overwrite: true
     container "${params.container__biobb_pmx}"
-
+    
     input:
-    path input_gro
-    path input_top_zip
-    path input_ndx
-
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), val(state), val(index), val(mutation)
+    
     output:
-    path "*_em.tpr", emit: tpr_files
-
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path("emout.gro"), path("emout.trr"), path("emout.edr"), path("emout.log"), val(state), val(index), val(mutation), emit: system
+    
     script:
     """
     python3 <<'EOF'
 from biobb_gromacs.gromacs.grompp import grompp
+from biobb_gromacs.gromacs.mdrun import mdrun
 import os
 
-# Inputs
+# Input files
 gro_file = '${input_gro}'
-top_zip = '${input_top_zip}'
+top_zip = '${processed_top_zip}'
 ndx_file = '${input_ndx}'
 
-# Output filename
-basename = os.path.basename(gro_file).replace('.gro', '')
-output_tpr = f"{basename}_em.tpr"
+# Check if FREEZE group exists in the index file
+freeze_group_exists = False
+try:
+    with open(ndx_file, 'r') as f:
+        content = f.read()
+        if '[ FREEZE ]' in content:
+            freeze_group_exists = True
+            print("FREEZE group found in index file")
+        else:
+            print("FREEZE group NOT found in index file")
+except:
+    print("Could not read index file")
 
-# Properties
-prop = {
+# Grompp: Creating portable binary run file for energy minimization
+output_tpr_min = 'em.tpr'
+
+# Base MDP parameters
+mdp_params = {
+    'integrator': 'steep',
+    'emtol': '100',
+    'dt': '0.001',
+    'nsteps': '10000',
+    'nstcomm': '1',
+    'nstcalcenergy': '1'
+}
+
+# Add freeze parameters only if FREEZE group exists
+if freeze_group_exists:
+    mdp_params['freezegrps'] = 'FREEZE'
+    mdp_params['freezedim'] = 'Y Y Y'
+    print("Adding freeze constraints to MDP")
+else:
+    print("Running without freeze constraints")
+
+prop_grompp = {
     'gmx_lib': '${params.gmxlib}',
-    'mdp': {
-        'integrator': 'steep',
-        'emtol': '100',
-        'dt': '0.001',
-        'nsteps': '10000',
-        'nstcomm': '1',
-        'nstcalcenergy': '1',
-        'freezegrps': 'FREEZE',
-        'freezedim': 'Y Y Y'
-    },
+    'mdp': mdp_params,
     'simulation_type': 'minimization'
 }
 
@@ -315,12 +322,186 @@ prop = {
 grompp(input_gro_path=gro_file,
        input_top_zip_path=top_zip,
        input_ndx_path=ndx_file,
-       output_tpr_path=output_tpr,
-       properties=prop)
+       output_tpr_path=output_tpr_min,
+       properties=prop_grompp)
+
+# Mdrun: Running minimization
+output_min_trr = 'emout.trr'
+output_min_gro = 'emout.gro'
+output_min_edr = 'emout.edr'
+output_min_log = 'emout.log'
+
+# Run mdrun
+mdrun(input_tpr_path=output_tpr_min,
+      output_trr_path=output_min_trr,
+      output_gro_path=output_min_gro,
+      output_edr_path=output_min_edr,
+      output_log_path=output_min_log)
 EOF
     """
 }
 
+process gmxEnergyAnalysis {
+    cache = true
+    debug = false
+    publishDir "${params.output_folder}/analysis/state_${state}/frame_${index}", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+    
+    input:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), val(state), val(index), val(mutation)
+    
+    output:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), path("*.xvg"), path("*.png"), path("*.dat"), val(state), val(index), val(mutation), emit: system
+    
+    script:
+    """
+    python3 <<'EOF'
+from biobb_analysis.gromacs.gmx_energy import gmx_energy
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+
+# Input files
+edr_file = '${min_edr}'
+
+# Create prop dict and inputs/outputs
+output_min_ene_xvg = 'min_ene.xvg'
+prop = {
+    'terms': ["Potential"]
+}
+
+# Create and launch bb
+gmx_energy(input_energy_path=edr_file, 
+          output_xvg_path=output_min_ene_xvg, 
+          properties=prop)
+
+# Read data from XVG file and filter energy values higher than 1000 kJ/mol
+x_data = []
+y_data = []
+
+with open(output_min_ene_xvg, 'r') as energy_file:
+    for line in energy_file:
+        if not line.startswith(("#", "@")):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    x_val = float(parts[0])
+                    y_val = float(parts[1])
+                    if y_val < 1000:  # Filter high energy values
+                        x_data.append(x_val)
+                        y_data.append(y_val)
+                except ValueError:
+                    continue
+
+# Create matplotlib plot and save as PNG
+plt.figure(figsize=(10, 6))
+plt.plot(x_data, y_data, 'b-', linewidth=1.5, markersize=2)
+plt.xlabel('Energy Minimization Step')
+plt.ylabel('Potential Energy (kJ/mol)')
+plt.title('Energy Minimization')
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+
+# Save PNG
+basename = os.path.basename(edr_file).replace('.edr', '')
+png_filename = f"{basename}_energy_plot.png"
+plt.savefig(png_filename, dpi=300, bbox_inches='tight')
+plt.close()
+
+# Create data file for gnuplot/xmgrace (simple two-column format)
+dat_filename = f"{basename}_energy_data.dat"
+with open(dat_filename, 'w') as f:
+    f.write("# Energy Minimization Data\\n")
+    f.write("# Column 1: Step\\n")
+    f.write("# Column 2: Potential Energy (kJ/mol)\\n")
+    for x, y in zip(x_data, y_data):
+        f.write(f"{x:12.6f} {y:12.6f}\\n")
+
+print(f"Generated {png_filename} and {dat_filename}")
+print(f"XVG file: {output_min_ene_xvg}")
+print(f"Data points: {len(x_data)}")
+if len(y_data) > 0:
+    print(f"Energy range: {min(y_data):.2f} to {max(y_data):.2f} kJ/mol")
+EOF
+    """
+}
+process gmxEquilibrate {
+    cache = true
+    debug = false
+    publishDir "${params.output_folder}/equilibration/state_${state}/frame_${index}", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+    
+    input:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), path(energy_xvg), path(energy_png), path(energy_dat), val(state), val(index), val(mutation)
+    
+    output:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), path(energy_xvg), path(energy_png), path(energy_dat), path("eqout*.gro"), path("eqout*.trr"), path("eqout*.edr"), path("eqout*.log"), val(state), val(index), val(mutation), emit: system
+    
+    script:
+    """
+    python3 <<'EOF'
+from biobb_gromacs.gromacs.grompp import grompp
+from biobb_gromacs.gromacs.mdrun import mdrun
+import os
+
+# Input files
+min_gro = '${min_gro}'
+processed_top_zip = '${processed_top_zip}'
+state = '${state}'
+gmxlib = '${params.gmxlib}'
+
+print(f"Starting equilibration for state {state}")
+print(f"Using structure: {min_gro}")
+print(f"Using topology: {processed_top_zip}")
+
+# Grompp: Creating portable binary run file for system equilibration
+output_tpr_eq = f'eq{state}_20ps.tpr'
+
+# MDP parameters for equilibration
+mdp_params = {
+    'nsteps': '10000',      # 10000 steps x 0.001 ps = 10 ps
+    'dt': '0.001',          # 1 fs timestep for proper dummy atom equilibration
+    'nstcomm': '1',
+    'nstcalcenergy': '1'
+}
+
+prop_grompp = {
+    'gmx_lib': gmxlib,
+    'mdp': mdp_params,
+    'simulation_type': 'free'
+}
+
+# Run grompp (without index file - not needed for basic equilibration)
+print(f"Running grompp for state {state}...")
+grompp(input_gro_path=min_gro,
+       input_top_zip_path=processed_top_zip,
+       output_tpr_path=output_tpr_eq,
+       properties=prop_grompp)
+
+print(f"Generated TPR file: {output_tpr_eq}")
+
+# Mdrun: Running equilibration
+output_eq_trr = f'eqout{state}.trr'
+output_eq_gro = f'eqout{state}.gro'
+output_eq_edr = f'eqout{state}.edr'
+output_eq_log = f'eqout{state}.log'
+
+print(f"Running mdrun for state {state}...")
+mdrun(input_tpr_path=output_tpr_eq,
+      output_trr_path=output_eq_trr,
+      output_gro_path=output_eq_gro,
+      output_edr_path=output_eq_edr,
+      output_log_path=output_eq_log)
+
+print(f"Equilibration completed for state {state}")
+print(f"Generated files:")
+print(f"  Structure: {output_eq_gro}")
+print(f"  Trajectory: {output_eq_trr}")
+print(f"  Energy: {output_eq_edr}")
+print(f"  Log: {output_eq_log}")
+EOF
+    """
+}
 
 workflow test {
     main:
@@ -346,9 +527,12 @@ workflow test {
         inputs.stateB_tpr
     )
 
-    // Debug / verify outputs
-    //snapshots.stateA_pdbs.view { "Extracted StateA snapshot: $it" }
-    //snapshots.stateB_pdbs.view { "Extracted StateB snapshot: $it" }
+
+    // Define mutation dictionary
+    def mutations = [
+        'A': '10Ala',
+        'B': '10Ile'
+    ]
 
     stateA_sorted = snapshots.stateA_pdbs
         .collect()
@@ -362,155 +546,30 @@ workflow test {
             files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
         }
 
-    // Debug: let's see what combine actually produces
-    stateA_sorted.combine(stateB_sorted).view { "Combined result: $it" }
-
-    // Try a different approach - zip the indexed channels
-    chA_indexed = stateA_sorted
-        .flatMap { files ->
-            files.withIndex().collect { file, idx -> [file, 'A', idx] }
-        }
-
-    chB_indexed = stateB_sorted
-        .flatMap { files ->
-            files.withIndex().collect { file, idx -> [file, 'B', idx] }
-        }
-
-    // Group by index and collect pairs
-    ch_pbc = chA_indexed
-        .mix(chB_indexed)
-        .groupTuple(by: 2)  // group by index (3rd element)
-        .map { grouped ->
-            // grouped will be [file_list, label_list, index]
-            def files = grouped[0]
-            def labels = grouped[1] 
-            def index = grouped[2]
-            
-            // Create pairs for this index
-            (0..<files.size()).collect { i ->
-                [files[i], labels[i], index]
-            }
-        }
-
-    // How many snapshots to run
-    running_snaps = ch_pbc.take(params.n_snapshots_to_run).flatMap { it }
-    //running_snaps.view()
-    // Step 6: run pmxMutateFrames on all pairs
-    pmxMutateFrames(running_snaps)
-    pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs.flatten())
-    pmxGentop(pdb2gmxFrames.output.top_files)
-    gmxMakeNdx(pdb2gmxFrames.output.gro_files)
-}
-
-
-workflow prod {
-    main:
-    // Step 1: define all URLs in one channel
-    urls_ch = Channel.value([
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA.tpr",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateA_1ns.xtc",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB.tpr",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/stateB_1ns.xtc",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlA.zip",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/dhdlB.zip",
-        "https://github.com/bioexcel/biobb_workflows/raw/main/biobb_wf_pmx_tutorial/docker/pmx_tutorial/schema.png"
-    ])
-
-    // Step 2: run downloadInputs
-    inputs = downloadInputs(urls_ch)
-
-    // Step 3: run extractSnapshots
-    snapshots = extractSnapshots(
-        inputs.stateA_traj,
-        inputs.stateA_tpr,
-        inputs.stateB_traj,
-        inputs.stateB_tpr
-    )
-
-    // Debug / verify outputs
-    //snapshots.stateA_pdbs.view { "Extracted StateA snapshot: $it" }
-    //snapshots.stateB_pdbs.view { "Extracted StateB snapshot: $it" }
-
-stateA_sorted = snapshots.stateA_pdbs
-    .collect()
-    .map { files ->
-        files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
-    }
-
-stateB_sorted = snapshots.stateB_pdbs
-    .collect()
-    .map { files ->
-        files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
-    }
-
-// Debug: let's see what combine actually produces
-stateA_sorted.combine(stateB_sorted).view { "Combined result: $it" }
-
-// Try a different approach - zip the indexed channels
+// Create indexed channels with mutation info and take first n entries
 chA_indexed = stateA_sorted
     .flatMap { files ->
-        files.withIndex().collect { file, idx -> [file, 'A', idx] }
+        files.withIndex().collect { file, idx -> [file, 'A', idx, mutations['A']] }
     }
+    .take(params.n_snapshots_to_run)
 
 chB_indexed = stateB_sorted
     .flatMap { files ->
-        files.withIndex().collect { file, idx -> [file, 'B', idx] }
+        files.withIndex().collect { file, idx -> [file, 'B', idx, mutations['B']] }
     }
+    .take(params.n_snapshots_to_run)
 
-// Group by index and collect pairs
-ch_pbc = chA_indexed
-    .mix(chB_indexed)
-    .groupTuple(by: 2)  // group by index (3rd element)
-    .map { grouped ->
-        // grouped will be [file_list, label_list, index]
-        def files = grouped[0]
-        def labels = grouped[1] 
-        def index = grouped[2]
-        
-        // Create pairs for this index
-        (0..<files.size()).collect { i ->
-            [files[i], labels[i], index]
-        }
-    }
+// Combine both channels for the pipeline
+running_snaps = chA_indexed.mix(chB_indexed)
 
-ch_pbc.view()
-
-return
-
-
-stateA_sorted = snapshots.stateA_pdbs
-    .collect()
-    .map { files ->
-        files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
-    }
-
-stateB_sorted = snapshots.stateB_pdbs
-    .collect()
-    .map { files ->
-        files.sort { f -> (f.name =~ /\d+/)[0].toInteger() }
-    }
-
-// Add index and label A to stateA_sorted - correct tuple order: [file, label, index]
-chA_indexed = stateA_sorted
-    .flatMap { files ->
-        files.withIndex().collect { file, idx -> [file, 'A', idx] }
-    }
-
-// Add index and label B to stateB_sorted - correct tuple order: [file, label, index]  
-chB_indexed = stateB_sorted
-    .flatMap { files ->
-        files.withIndex().collect { file, idx -> [file, 'B', idx] }
-    }
-
-// Merge the channels properly
-ch_pbc = chA_indexed.mix(chB_indexed)
-ch_pbc.view()
-
-return
-
-    // Step 6: run pmxMutateFrames on all pairs
-    pmxMutateFrames(ch_pbc.take(1))
-    pdb2gmxFrames(pmxMutateFrames.output.mut_pdbs.flatten())
-    pmxGentop(pdb2gmxFrames.output.top_files)
-    gmxMakeNdx(pdb2gmxFrames.output.gro_files)
+// Step 6: run pmxMutateFrames on all pairs
+running_snaps.view()
+pmxMutateFrames(running_snaps)
+pdb2gmxFrames(pmxMutateFrames.output.system)
+pmxGentop(pdb2gmxFrames.output.system)
+gmxMakeNdx(pmxGentop.output.system)
+gmxMinimize(gmxMakeNdx.output.system)
+gmxEnergyAnalysis(gmxMinimize.output.system)
+gmxEquilibrate(gmxEnergyAnalysis.output.system)
 }
+

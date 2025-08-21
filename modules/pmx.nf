@@ -503,6 +503,127 @@ EOF
     """
 }
 
+process gmxEquilibrationAnalysis {
+    cache = true
+    debug = false
+    publishDir "${params.output_folder}/analysis/equilibration/state_${state}/frame_${index}", mode: 'copy', overwrite: true
+    container "${params.container__biobb_pmx}"
+    
+    input:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), path(energy_xvg), path(energy_png), path(energy_dat), path(eq_gro), path(eq_trr), path(eq_edr), path(eq_log), val(state), val(index), val(mutation)
+    
+    output:
+    tuple path(input_top_zip), path(processed_top_zip), path(input_gro), path(input_ndx), path(min_gro), path(min_trr), path(min_edr), path(min_log), path(energy_xvg), path(energy_png), path(energy_dat), path(eq_gro), path(eq_trr), path(eq_edr), path(eq_log), path("eq*_PD.xvg"), path("eq*_PD.png"), path("eq*_PD.dat"), val(state), val(index), val(mutation), emit: system
+    
+    script:
+    """
+    python3 <<'EOF'
+from biobb_analysis.gromacs.gmx_energy import gmx_energy
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+
+# Input files
+eq_edr = '${eq_edr}'
+state = '${state}'
+
+print(f"Starting equilibration analysis for state {state}")
+print(f"Using energy file: {eq_edr}")
+
+# GMXEnergy: Getting system pressure and density by time during NPT Equilibration
+output_eq_pd_xvg = f'eq{state}_PD.xvg'
+prop = {
+    'terms': ["Pressure", "Density"]
+}
+
+print(f"Extracting Pressure and Density data for state {state}...")
+gmx_energy(input_energy_path=eq_edr,
+          output_xvg_path=output_eq_pd_xvg,
+          properties=prop)
+
+print(f"Generated XVG file: {output_eq_pd_xvg}")
+
+# Read data from XVG file for plotting
+time_data = []
+pressure_data = []
+density_data = []
+
+with open(output_eq_pd_xvg, 'r') as pd_file:
+    for line in pd_file:
+        if not line.startswith(("#", "@")):
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    time_val = float(parts[0])
+                    pressure_val = float(parts[1])
+                    density_val = float(parts[2])
+                    
+                    time_data.append(time_val)
+                    pressure_data.append(pressure_val)
+                    density_data.append(density_val)
+                except ValueError:
+                    continue
+
+# Create matplotlib plots
+if len(time_data) > 0:
+    # Create dual-axis plot for pressure and density
+    fig, ax1 = plt.subplots(figsize=(12, 8))
+    
+    # Plot pressure on left axis
+    color = 'tab:red'
+    ax1.set_xlabel('Time (ps)')
+    ax1.set_ylabel('Pressure (bar)', color=color)
+    ax1.plot(time_data, pressure_data, color=color, linewidth=1.5, alpha=0.7, label='Pressure')
+    ax1.tick_params(axis='y', labelcolor=color)
+    ax1.grid(True, alpha=0.3)
+    
+    # Create second y-axis for density
+    ax2 = ax1.twinx()
+    color = 'tab:blue'
+    ax2.set_ylabel('Density (kg/m³)', color=color)
+    ax2.plot(time_data, density_data, color=color, linewidth=1.5, alpha=0.7, label='Density')
+    ax2.tick_params(axis='y', labelcolor=color)
+    
+    # Add title and layout
+    plt.title(f'NPT Equilibration - Pressure and Density vs Time (State {state})')
+    fig.tight_layout()
+    
+    # Save PNG
+    png_filename = f"eq{state}_PD.png"
+    plt.savefig(png_filename, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Create data file for further analysis
+    dat_filename = f"eq{state}_PD.dat"
+    with open(dat_filename, 'w') as f:
+        f.write(f"# NPT Equilibration Analysis - State {state}\\n")
+        f.write("# Column 1: Time (ps)\\n")
+        f.write("# Column 2: Pressure (bar)\\n")
+        f.write("# Column 3: Density (kg/m³)\\n")
+        for t, p, d in zip(time_data, pressure_data, density_data):
+            f.write(f"{t:12.6f} {p:12.6f} {d:12.6f}\\n")
+    
+    print(f"Generated {png_filename} and {dat_filename}")
+    print(f"Data points: {len(time_data)}")
+    
+    if len(pressure_data) > 0:
+        avg_pressure = np.mean(pressure_data)
+        std_pressure = np.std(pressure_data)
+        print(f"Average Pressure: {avg_pressure:.2f} ± {std_pressure:.2f} bar")
+    
+    if len(density_data) > 0:
+        avg_density = np.mean(density_data)
+        std_density = np.std(density_data)
+        print(f"Average Density: {avg_density:.2f} ± {std_density:.2f} kg/m³")
+        
+else:
+    print("Warning: No data points found in XVG file")
+
+print(f"Equilibration analysis completed for state {state}")
+EOF
+    """
+}
+
 workflow test {
     main:
     // Step 1: define all URLs in one channel
@@ -571,5 +692,6 @@ gmxMakeNdx(pmxGentop.output.system)
 gmxMinimize(gmxMakeNdx.output.system)
 gmxEnergyAnalysis(gmxMinimize.output.system)
 gmxEquilibrate(gmxEnergyAnalysis.output.system)
+gmxEquilibrationAnalysis(gmxEquilibrate.output.system)
 }
 
